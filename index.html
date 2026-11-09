@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quản Lý Quỹ Cầu Lông</title>
+    
+    <!-- Tailwind CSS cho giao diện -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- FontAwesome cho các icon -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- React và ReactDOM (Phiên bản dùng trực tiếp trên trình duyệt) -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel để biên dịch code React (JSX) ngay trên trình duyệt -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        /* Tùy chỉnh nhẹ thanh cuộn */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans antialiased">
+    
+    <!-- Nơi ứng dụng React sẽ hiển thị -->
+    <div id="root"></div>
+
+    <!-- Code ứng dụng (React + JSX) -->
+    <script type="text/babel">
+        const { useState, useMemo, useEffect } = React;
+
+        function App() {
+            // Hàm hỗ trợ lưu/lấy dữ liệu từ LocalStorage
+            const loadData = (key, defaultVal) => {
+                try {
+                    const saved = localStorage.getItem(key);
+                    return saved ? JSON.parse(saved) : defaultVal;
+                } catch (e) {
+                    return defaultVal;
+                }
+            };
+
+            // Trạng thái quản lý dữ liệu
+            const [monthYear, setMonthYear] = useState(() => loadData('cl_monthYear', new Date().toISOString().slice(0, 7))); // YYYY-MM
+            
+            const [courtFee, setCourtFee] = useState(() => loadData('cl_courtFee', 0));
+            const [teaFee, setTeaFee] = useState(() => loadData('cl_teaFee', 0));
+            const [expenses, setExpenses] = useState(() => loadData('cl_expenses', []));
+
+            const [fixedMembers, setFixedMembers] = useState(() => loadData('cl_fixedMembers', [
+                { id: 1, name: 'Nguyễn Văn A' },
+                { id: 2, name: 'Trần Thị B' },
+            ]));
+
+            const [dropInGuests, setDropInGuests] = useState(() => loadData('cl_dropInGuests', []));
+
+            // Tự động lưu dữ liệu
+            useEffect(() => { localStorage.setItem('cl_monthYear', JSON.stringify(monthYear)); }, [monthYear]);
+            useEffect(() => { localStorage.setItem('cl_courtFee', JSON.stringify(courtFee)); }, [courtFee]);
+            useEffect(() => { localStorage.setItem('cl_teaFee', JSON.stringify(teaFee)); }, [teaFee]);
+            useEffect(() => { localStorage.setItem('cl_expenses', JSON.stringify(expenses)); }, [expenses]);
+            useEffect(() => { localStorage.setItem('cl_fixedMembers', JSON.stringify(fixedMembers)); }, [fixedMembers]);
+            useEffect(() => { localStorage.setItem('cl_dropInGuests', JSON.stringify(dropInGuests)); }, [dropInGuests]);
+
+            // Format tiền VNĐ
+            const formatVND = (amount) => {
+                return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount || 0);
+            };
+
+            // Tính toán số buổi đánh
+            const { monCount, wedCount, totalSessions, defaultCourtFee, defaultTeaFee } = useMemo(() => {
+                if (!monthYear) return { monCount: 0, wedCount: 0, totalSessions: 0, defaultCourtFee: 0, defaultTeaFee: 0 };
+                const [year, month] = monthYear.split('-');
+                let mCount = 0;
+                let wCount = 0;
+                let date = new Date(year, month - 1, 1);
+                
+                while (date.getMonth() === parseInt(month) - 1) {
+                    if (date.getDay() === 1) mCount++;
+                    if (date.getDay() === 3) wCount++;
+                    date.setDate(date.getDate() + 1);
+                }
+                const total = mCount + wCount;
+                return { 
+                    monCount: mCount, 
+                    wedCount: wCount, 
+                    totalSessions: total, 
+                    defaultCourtFee: total * 2 * 240000,
+                    defaultTeaFee: total * 2 * 20000
+                };
+            }, [monthYear]);
+
+            // Tự cập nhật giá trị mặc định khi đổi tháng (nếu chưa nhập gì)
+            useEffect(() => {
+                setCourtFee(defaultCourtFee);
+                setTeaFee(defaultTeaFee);
+            }, [defaultCourtFee, defaultTeaFee]);
+
+            const totalOtherExpense = useMemo(() => expenses.reduce((sum, item) => sum + (Number(item.amount) || 0), 0), [expenses]);
+            const totalExpense = totalOtherExpense + (Number(courtFee) || 0) + (Number(teaFee) || 0);
+            
+            const totalDropInValue = useMemo(() => dropInGuests.reduce((sum, item) => {
+                return sum + ((Number(item.maleCount) || 0) * 70000) + ((Number(item.femaleCount) || 0) * 60000);
+            }, 0), [dropInGuests]);
+
+            const totalCashDropIn = useMemo(() => dropInGuests.reduce((sum, item) => {
+                if (!item.paidBy || item.paidBy === 'cash') {
+                    return sum + ((Number(item.maleCount) || 0) * 70000) + ((Number(item.femaleCount) || 0) * 60000);
+                }
+                return sum;
+            }, 0), [dropInGuests]);
+
+            const dropInDebts = useMemo(() => {
+                const debts = {};
+                fixedMembers.forEach(m => debts[m.id] = 0);
+                dropInGuests.forEach(g => {
+                    if (g.paidBy && g.paidBy !== 'cash') {
+                        const amount = (Number(g.maleCount) || 0) * 70000 + (Number(g.femaleCount) || 0) * 60000;
+                        if (debts[g.paidBy] !== undefined) debts[g.paidBy] += amount;
+                    }
+                });
+                return debts;
+            }, [dropInGuests, fixedMembers]);
+            
+            const feePerMember = useMemo(() => {
+                if (fixedMembers.length === 0) return 0;
+                const remainingExpense = totalExpense - totalDropInValue;
+                if (remainingExpense <= 0) return 0;
+                return Math.ceil((remainingExpense / fixedMembers.length) / 1000) * 1000;
+            }, [totalExpense, totalDropInValue, fixedMembers.length]);
+
+            const totalFixedBaseIncome = feePerMember * fixedMembers.length;
+            const totalDebtRecovered = Object.values(dropInDebts).reduce((sum, val) => sum + val, 0);
+            const totalIncome = totalCashDropIn + totalFixedBaseIncome + totalDebtRecovered;
+            const balance = totalIncome - totalExpense;
+
+            // Xử lý state changes
+            const updateExpense = (id, field, value) => setExpenses(expenses.map(e => e.id === id ? { ...e, [field]: value } : e));
+            const removeExpense = (id) => setExpenses(expenses.filter(e => e.id !== id));
+            
+            const updateFixedMember = (id, field, value) => setFixedMembers(fixedMembers.map(m => m.id === id ? { ...m, [field]: value } : m));
+            const removeFixedMember = (id) => setFixedMembers(fixedMembers.filter(m => m.id !== id));
+            
+            const updateDropInGuest = (id, field, value) => setDropInGuests(dropInGuests.map(g => g.id === id ? { ...g, [field]: value } : g));
+            const removeDropInGuest = (id) => setDropInGuests(dropInGuests.filter(g => g.id !== id));
+
+            return (
+                <div className="py-6 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto space-y-6 pb-20">
+                    {/* Header */}
+                    <div className="text-center pb-4">
+                        <h1 className="text-3xl font-bold text-slate-900 flex items-center justify-center gap-3">
+                            <i className="fa-solid fa-chart-line text-blue-600"></i>
+                            Quản Lý Quỹ Cầu Lông
+                        </h1>
+                        <div className="mt-4 flex justify-center items-center gap-2">
+                            <i className="fa-regular fa-calendar text-slate-500"></i>
+                            <input 
+                                type="month" 
+                                value={monthYear}
+                                onChange={(e) => setMonthYear(e.target.value)}
+                                className="px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium text-slate-700 bg-white shadow-sm"
+                            />
+                        </div>
+                    </div>
+
+                    {/* Dashboard */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="bg-white rounded-xl shadow-sm border border-emerald-100 p-5 flex items-center gap-4">
+                            <div className="p-3 bg-emerald-100 rounded-full text-emerald-600">
+                                <i className="fa-solid fa-arrow-trend-up text-xl"></i>
+                            </div>
+                            <div>
+                                <p className="text-sm font-medium text-emerald-600">Tổng Thu</p>
+                                <p className="text-2xl font-bold text-slate-900">{formatVND(totalIncome)}</p>
+                            </div>
+                        </div>
+
+                        <div className="bg-white rounded-xl shadow-sm border border-rose-100 p-5 flex items-center gap-4">
+                            <div className="p-3 bg-rose-100 rounded-full text-rose-600">
+                                <i className="fa-solid fa-arrow-trend-down text-xl"></i>
+                            </div>
+                            <div>
+                                <p className="text-sm font-medium text-rose-600">Tổng Chi</p>
+                                <p className="text-2xl font-bold text-slate-900">{formatVND(totalExpense)}</p>
+                            </div>
+                        </div>
+
+                        <div className="bg-white rounded-xl shadow-sm border border-blue-100 p-5 flex items-center gap-4">
+                            <div className="p-3 bg-blue-100 rounded-full text-blue-600">
+                                <i className="fa-solid fa-wallet text-xl"></i>
+                            </div>
+                            <div>
+                                <p className="text-sm font-medium text-blue-600">Cân Đối Quỹ</p>
+                                <p className={`text-2xl font-bold ${balance >= 0 ? 'text-blue-600' : 'text-rose-600'}`}>
+                                    {formatVND(balance)}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Chi Phí */}
+                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                        <div className="bg-slate-100 px-5 py-4 border-b border-slate-200 flex justify-between items-center">
+                            <h2 className="text-lg font-semibold flex items-center gap-2 text-slate-800">
+                                <i className="fa-solid fa-arrow-trend-down text-rose-500"></i> Chi Phí Trong Tháng
+                            </h2>
+                            <span className="font-bold text-rose-600">{formatVND(totalExpense)}</span>
+                        </div>
+                        <div className="p-5 space-y-4">
+                            {/* Tiền sân */}
+                            <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center bg-rose-50 p-4 rounded-lg border border-rose-200 shadow-sm">
+                                <div className="flex-1 w-full">
+                                    <p className="font-bold text-rose-800">Tiền sân (Thứ 2 & Thứ 4)</p>
+                                    <p className="text-sm text-rose-600 mt-1">
+                                        Tháng này: {monCount} ngày T2, {wedCount} ngày T4 <br className="sm:hidden" />
+                                        (Gợi ý: {totalSessions} buổi x 2 sân x 240k = {formatVND(defaultCourtFee)})
+                                    </p>
+                                </div>
+                                <div className="flex gap-2 w-full sm:w-auto font-bold text-rose-700 sm:text-right text-lg items-center">
+                                    <input type="number" value={courtFee} onChange={(e) => setCourtFee(e.target.value)} className="w-full sm:w-32 px-3 py-2 border border-rose-300 rounded-md focus:outline-none focus:ring-2 focus:ring-rose-500 text-right bg-white text-rose-900"/>
+                                    <span className="text-sm">₫</span>
+                                </div>
+                            </div>
+                            
+                            {/* Tiền trà đá */}
+                            <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center bg-rose-50 p-4 rounded-lg border border-rose-200 shadow-sm">
+                                <div className="flex-1 w-full">
+                                    <p className="font-bold text-rose-800">Tiền trà đá</p>
+                                    <p className="text-sm text-rose-600 mt-1">(Gợi ý: {totalSessions} buổi x 2 bình x 20k = {formatVND(defaultTeaFee)})</p>
+                                </div>
+                                <div className="flex gap-2 w-full sm:w-auto font-bold text-rose-700 sm:text-right text-lg items-center">
+                                    <input type="number" value={teaFee} onChange={(e) => setTeaFee(e.target.value)} className="w-full sm:w-32 px-3 py-2 border border-rose-300 rounded-md focus:outline-none focus:ring-2 focus:ring-rose-500 text-right bg-white text-rose-900"/>
+                                    <span className="text-sm">₫</span>
+                                </div>
+                            </div>
+
+                            {/* Chi phí khác */}
+                            {expenses.map((expense) => (
+                                <div key={expense.id} className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+                                    <input type="text" placeholder="Tên chi phí (VD: Cầu lông)" value={expense.name} onChange={(e) => updateExpense(expense.id, 'name', e.target.value)} className="flex-1 w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                                    <div className="flex gap-2 w-full sm:w-auto">
+                                        <input type="number" placeholder="Số tiền" value={expense.amount || ''} onChange={(e) => updateExpense(expense.id, 'amount', e.target.value)} className="w-full sm:w-40 px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                                        <button onClick={() => removeExpense(expense.id)} className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-md transition-colors"><i className="fa-solid fa-trash"></i></button>
+                                    </div>
+                                </div>
+                            ))}
+                            <button onClick={() => setExpenses([...expenses, { id: Date.now(), name: '', amount: 0 }])} className="text-sm text-blue-600 hover:text-blue-700 font-medium px-2 py-1 rounded-md hover:bg-blue-50"><i className="fa-solid fa-plus"></i> Thêm chi phí</button>
+                        </div>
+                    </div>
+
+                    {/* Thu Cố Định */}
+                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                        <div className="bg-slate-100 px-5 py-4 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                            <div>
+                                <h2 className="text-lg font-semibold flex items-center gap-2 text-slate-800">
+                                    <i className="fa-solid fa-users text-emerald-500"></i> Thu Cố Định
+                                </h2>
+                                <p className="text-sm text-slate-600 mt-1">Chi phí còn lại: <span className="font-medium">{formatVND(Math.max(0, totalExpense - totalDropInValue))}</span> / {fixedMembers.length} người</p>
+                            </div>
+                            <div className="text-left sm:text-right">
+                                <p className="text-sm text-slate-500">Mức phí chung / người</p>
+                                <span className="font-bold text-emerald-600 text-xl">{formatVND(feePerMember)}</span>
+                            </div>
+                        </div>
+                        <div className="p-5 space-y-4">
+                            {fixedMembers.map((member) => {
+                                const memberDebt = dropInDebts[member.id] || 0;
+                                const totalDue = feePerMember + memberDebt;
+                                return (
+                                    <div key={member.id} className="flex flex-col xl:flex-row gap-3 items-start xl:items-center p-3 rounded-lg border border-slate-100 bg-slate-50 hover:bg-white transition-colors">
+                                        <input type="text" placeholder="Tên thành viên" value={member.name} onChange={(e) => updateFixedMember(member.id, 'name', e.target.value)} className="flex-1 w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                                        <div className="flex flex-col sm:flex-row gap-2 w-full xl:w-auto items-start sm:items-center justify-between xl:justify-end text-sm">
+                                            <div className="flex items-center gap-2 bg-white px-3 py-1.5 border border-slate-200 rounded-md"><span className="text-slate-500 whitespace-nowrap">Phí tháng:</span><span className="font-medium text-slate-700">{formatVND(feePerMember)}</span></div>
+                                            {memberDebt > 0 && (<div className="flex items-center gap-2 bg-orange-50 px-3 py-1.5 border border-orange-200 rounded-md"><span className="text-orange-600 whitespace-nowrap">Dắt vãng lai:</span><span className="font-medium text-orange-700">+{formatVND(memberDebt)}</span></div>)}
+                                            <div className="flex items-center gap-2 bg-emerald-50 px-3 py-1.5 border border-emerald-200 rounded-md justify-between"><span className="text-emerald-700 font-medium whitespace-nowrap">Tổng thu:</span><span className="font-bold text-emerald-700">{formatVND(totalDue)}</span></div>
+                                            <button onClick={() => removeFixedMember(member.id)} className="p-2 text-slate-400 hover:text-rose-500"><i className="fa-solid fa-trash"></i></button>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                            <button onClick={() => setFixedMembers([...fixedMembers, { id: Date.now(), name: '' }])} className="text-sm text-blue-600 hover:text-blue-700 font-medium px-2 py-1 rounded-md hover:bg-blue-50"><i className="fa-solid fa-plus"></i> Thêm thành viên</button>
+                        </div>
+                    </div>
+
+                    {/* Thu Vãng Lai */}
+                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                        <div className="bg-slate-100 px-5 py-4 border-b border-slate-200 flex justify-between items-center">
+                            <h2 className="text-lg font-semibold flex items-center gap-2 text-slate-800">
+                                <i className="fa-solid fa-money-bill-wave text-emerald-500"></i> Thu Vãng Lai
+                            </h2>
+                            <div className="text-right">
+                                <span className="font-bold text-emerald-600">{formatVND(totalDropInValue)}</span>
+                                <p className="text-xs text-slate-500">Giá trị đối trừ chi phí</p>
+                            </div>
+                        </div>
+                        <div className="p-5 space-y-4">
+                            {dropInGuests.map((guest) => (
+                                <div key={guest.id} className="flex flex-col md:flex-row gap-3 items-start md:items-center p-4 md:p-0 rounded-lg border border-slate-200 md:border-none">
+                                    <input type="date" value={guest.date} onChange={(e) => updateDropInGuest(guest.id, 'date', e.target.value)} className="w-full md:w-36 px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"/>
+                                    <input type="text" placeholder="Ghi chú (Tên khách)" value={guest.name} onChange={(e) => updateDropInGuest(guest.id, 'name', e.target.value)} className="flex-1 w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"/>
+                                    
+                                    <div className="flex gap-3 w-full md:w-auto items-center justify-between">
+                                        <div className="flex items-center gap-2 flex-1 md:flex-none">
+                                            <span className="text-sm font-medium text-slate-600">Nam:</span>
+                                            <input type="number" min="0" placeholder="0" value={guest.maleCount} onChange={(e) => updateDropInGuest(guest.id, 'maleCount', e.target.value)} className="w-full md:w-16 px-2 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-center"/>
+                                        </div>
+                                        <div className="flex items-center gap-2 flex-1 md:flex-none">
+                                            <span className="text-sm font-medium text-slate-600">Nữ:</span>
+                                            <input type="number" min="0" placeholder="0" value={guest.femaleCount} onChange={(e) => updateDropInGuest(guest.id, 'femaleCount', e.target.value)} className="w-full md:w-16 px-2 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-center"/>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full md:w-auto mt-2 md:mt-0 pt-3 md:pt-0 border-t border-slate-200 md:border-none">
+                                        <select value={guest.paidBy || 'cash'} onChange={(e) => updateDropInGuest(guest.id, 'paidBy', e.target.value)} className="w-full sm:w-auto px-2 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white">
+                                            <option value="cash">💵 Tiền mặt</option>
+                                            <optgroup label="Ghi nợ cho:">
+                                                {fixedMembers.filter(m => m.name.trim() !== '').map(m => (
+                                                    <option key={m.id} value={m.id}>👤 {m.name}</option>
+                                                ))}
+                                            </optgroup>
+                                        </select>
+                                        <div className="flex justify-between items-center w-full sm:w-auto">
+                                            <span className="font-bold text-emerald-600 min-w-[90px] text-right">
+                                                {formatVND((Number(guest.maleCount) || 0) * 70000 + (Number(guest.femaleCount) || 0) * 60000)}
+                                            </span>
+                                            <button onClick={() => removeDropInGuest(guest.id)} className="p-2 text-slate-400 hover:text-rose-500 ml-2"><i className="fa-solid fa-trash"></i></button>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                            <button onClick={() => setDropInGuests([...dropInGuests, { id: Date.now(), date: new Date().toISOString().split('T')[0], name: '', maleCount: '', femaleCount: '', paidBy: 'cash' }])} className="text-sm text-blue-600 hover:text-blue-700 font-medium px-2 py-1 rounded-md hover:bg-blue-50"><i className="fa-solid fa-plus"></i> Thêm khách vãng lai</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
